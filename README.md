@@ -58,11 +58,13 @@ contacts = load_dataset("<user>/<dataset>", data_files="contacts/*.jsonl", split
 
 | File | Purpose |
 |---|---|
-| `src/digital_twin/app.py` | Gradio app and the agent loop |
-| `src/digital_twin/context.py` | Builds the system prompt from the LinkedIn profile |
-| `src/digital_twin/tools.py` | Tool functions, their JSON schemas and the tool-call handler |
-| `src/digital_twin/styles.py` | UI theme and example prompts |
-| `src/digital_twin/files/` | Source documents (LinkedIn profile PDF) |
+| `app.py` | Entry point: Gradio app and the agent loop |
+| `digital_twin/context.py` | Builds the system prompt from the LinkedIn profile |
+| `digital_twin/tools.py` | Tool functions, their JSON schemas and the tool-call handler |
+| `digital_twin/styles.py` | UI theme and example prompts |
+| `digital_twin/files/` | Source documents (LinkedIn profile PDF) |
+| `space/README.md` | Hugging Face Space configuration and description |
+| `.github/workflows/deploy-space.yml` | Deploys the app to the Space on every push to `main` |
 
 ## Running locally
 
@@ -82,10 +84,8 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 2. Run:
 
    ```bash
-   uv run python src/digital_twin/app.py
+   uv run python app.py
    ```
-
-On Hugging Face Spaces, set the same values as Space variables and secrets instead of using a `.env` file.
 
 ## Roadmap
 
@@ -99,21 +99,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [Unreleased]
 
+### [0.1.0] - 2026-11-04
+
+First release.
+
 #### Added
+- Chat app built with Gradio, with a system prompt generated from my LinkedIn profile.
+- Agent loop written from scratch, without an agentic framework.
 - Limit on tool rounds per message, configurable with `MAX_TOOL_ROUNDS`, with a final tool-free answer when the limit is reached.
 - Tool errors (invalid arguments, unknown tools, failing tools) are returned to the model instead of crashing the app.
 - Gradio chat history is converted to plain text messages before being sent to the model.
-- Contact details and unanswered questions are stored in a private Hugging Face Dataset.
+- Tools to record contact details and questions the agent can't answer, stored in a private Hugging Face Dataset.
+- Handling of requests to delete stored details.
 - A privacy notice in the chat UI explaining what's stored and why.
-
-#### Changed
-- The system prompt is built from the LinkedIn profile only (`summary.txt` removed).
-- File paths are resolved relative to the source files, so the app can be started from any folder.
-
-#### Removed
-- Unused dependencies: `openai-agents`, `pydantic-ai-slim`, `ipykernel`, `ipywidgets`, `plotly`, `requests`.
-
-### [0.1.0] - 2026-11-04
-
-#### Added
-- First version: Gradio chat app, a LinkedIn-based system prompt, and stub tools for recording questions and contact details.

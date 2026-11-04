@@ -1,7 +1,7 @@
 from openai import OpenAI
-from context import TWIN_SYSTEM_PROMPT
-from tools import tools, handle_tool_calls
-from styles import CSS, JS, EXAMPLES
+from digital_twin.context import TWIN_SYSTEM_PROMPT
+from digital_twin.tools import tools, handle_tool_calls
+from digital_twin.styles import CSS, JS, EXAMPLES
 from dotenv import load_dotenv
 import gradio as gr
 import os
