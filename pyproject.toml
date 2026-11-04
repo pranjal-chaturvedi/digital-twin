@@ -12,5 +12,6 @@ dependencies = [
     "pydantic-ai-slim[mcp,openai]>=1.107.0",
     "pypdf>=6.10.2",
     "python-dotenv>=1.2.2",
-    "requests>=2.33.1"
+    "requests>=2.33.1",
+    "gradio>=6.31.0"
 ]
