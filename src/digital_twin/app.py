@@ -58,6 +58,11 @@ if __name__ == "__main__":
         chat,
         examples=EXAMPLES,
         title="Digital Twin",
-        description="Talk to my AI twin about my career",
+        description=(
+            "Talk to my AI twin about my career.\n\n"
+            "<sub>If you share your name or email in the chat, they're stored privately so I can "
+            "follow up, and questions the twin can't answer are saved so I can improve it. "
+            "Ask in the chat to have your details deleted.</sub>"
+        ),
         chatbot=gr.Chatbot(show_label=False),
     ).launch(css=CSS, js=JS, theme=gr.themes.Base())

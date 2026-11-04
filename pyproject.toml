@@ -7,6 +7,6 @@ dependencies = [
     "pydantic>=2.13.3",
     "pypdf>=6.10.2",
     "python-dotenv>=1.2.2",
-    "requests>=2.33.1",
     "gradio>=6.31.0",
+    "huggingface-hub>=2.4.0",
 ]

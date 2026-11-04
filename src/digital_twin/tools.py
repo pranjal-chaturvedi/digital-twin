@@ -1,19 +1,73 @@
 import inspect
 import json
 import os
-import requests
+import tempfile
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
 from dotenv import load_dotenv
+from huggingface_hub import CommitScheduler
 
 load_dotenv(override=True)
 
+HF_DATASET_REPO = os.getenv("HF_DATASET_REPO")
+PUSH_EVERY_MINUTES = 1
+MAX_FIELD_LENGTH = 2000
+
+# A Space starts each run with an empty disk. Reusing a file name would overwrite the
+# copy already on the Hub instead of adding to it, so every run writes its own files.
+_RUN_ID = uuid.uuid4().hex
+_scheduler = None
+_scheduler_init_lock = threading.Lock()
+
+
+def _get_scheduler():
+    """Create the Hub uploader on first use, so the app can start without storage configured."""
+    global _scheduler
+    with _scheduler_init_lock:
+        if _scheduler is None:
+            if not HF_DATASET_REPO:
+                raise RuntimeError("HF_DATASET_REPO is not set")
+            scheduler = CommitScheduler(
+                repo_id=HF_DATASET_REPO,
+                repo_type="dataset",
+                private=True,
+                folder_path=tempfile.mkdtemp(prefix="digital-twin-"),
+                every=PUSH_EVERY_MINUTES,
+            )
+            # `private=True` is ignored for a repo that already exists, so check it explicitly
+            if not scheduler.api.repo_info(HF_DATASET_REPO, repo_type="dataset").private:
+                scheduler.stop()
+                raise RuntimeError("HF_DATASET_REPO is public; refusing to store personal data in it")
+            _scheduler = scheduler
+    return _scheduler
+
+
+def _append_record(table, record):
+    """Append a record to this run's JSON Lines file for `table`; the scheduler pushes it to the Hub."""
+    scheduler = _get_scheduler()
+    record = {"timestamp": datetime.now(timezone.utc).isoformat(), **record}
+    path = scheduler.folder_path / table / f"{_RUN_ID}.jsonl"
+    with scheduler.lock:
+        path.parent.mkdir(exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _clip(value):
+    """Cap a model-supplied value so one call can't store an arbitrarily large blob."""
+    return str(value)[:MAX_FIELD_LENGTH]
+
 
 def record_user_details(email, name="Name not provided", notes="not provided"):
-    # record user details in a Google Sheet
+    _append_record("contacts", {"name": _clip(name), "email": _clip(email), "notes": _clip(notes)})
     return "OK"
 
 
 def record_unknown_question(question):
-    # record unknown questions in a Google sheet
+    _append_record("questions", {"question": _clip(question)})
     return "OK"
 
 
