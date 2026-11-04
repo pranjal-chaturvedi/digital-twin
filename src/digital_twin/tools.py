@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import requests
@@ -58,14 +59,37 @@ tool_map = {
 }
 
 
+def _run_tool(tool_name, raw_arguments):
+    """Run one tool call; problems come back as {"error": ...} for the model to read and correct."""
+    tool = tool_map.get(tool_name)
+    if tool is None:
+        return {"error": f"Unknown tool: {tool_name}"}
+    try:
+        arguments = json.loads(raw_arguments)
+    except json.JSONDecodeError:
+        return {"error": "Arguments were not valid JSON. Retry with a JSON object matching the tool schema."}
+    if not isinstance(arguments, dict):
+        return {"error": "Arguments must be a JSON object matching the tool schema."}
+    try:
+        # Check argument names against the function signature before calling it
+        inspect.signature(tool).bind(**arguments)
+    except TypeError as e:
+        return {"error": f"Invalid arguments: {e}"}
+    try:
+        return tool(**arguments)
+    except Exception as e:
+        # Arguments may hold PII (emails, names), so log only the error type
+        print(f"Tool failed: {tool_name} ({type(e).__name__})", flush=True)
+        return {"error": f"The tool failed with {type(e).__name__}. Do not retry; tell the user it didn't work."}
+
+
 def handle_tool_calls(tool_calls):
+    # Every tool_call must get exactly one tool reply, or the next API call is rejected
     results = []
     for tool_call in tool_calls:
         tool_name = tool_call.function.name
-        arguments = json.loads(tool_call.function.arguments)
         print(f"Tool called: {tool_name}", flush=True)
-        tool = tool_map.get(tool_name)
-        result = tool(**arguments) if tool else "Unknown tool: " + tool_name
+        result = _run_tool(tool_name, tool_call.function.arguments)
         results.append(
             {"role": "tool", "content": json.dumps(result), "tool_call_id": tool_call.id}
         )

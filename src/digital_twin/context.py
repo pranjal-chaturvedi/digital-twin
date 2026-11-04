@@ -1,15 +1,16 @@
+from pathlib import Path
+
 from pypdf import PdfReader
 
-reader = PdfReader("files/linkedin.pdf")
+FILES_DIR = Path(__file__).parent / "files"
+
+reader = PdfReader(FILES_DIR / "linkedin.pdf")
 
 linkedin = ""
 for page in reader.pages:
     text = page.extract_text()
     if text:
         linkedin += text
-
-with open("summary.txt", "r", encoding="utf-8") as f:
-    summary = f.read()
 
 TWIN_SYSTEM_PROMPT = f"""
 
@@ -18,10 +19,6 @@ TWIN_SYSTEM_PROMPT = f"""
 You are a digital twin running on a website, chatting with visitors of the website.
 You represent the person who's website you are on.
 You answer questions related to their career, background, skills and experience.
-
-Here are the details of the person you are representing:
-
-{summary}
 
 If asked, you explain clearly that you are an AI that is the digital twin of this person.
 
