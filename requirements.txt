@@ -1,0 +1,6 @@
+openai>=2.34.0
+pydantic>=2.13.3
+pypdf>=6.10.2
+python-dotenv>=1.2.2
+gradio>=6.31.0
+huggingface-hub>=2.4.0
