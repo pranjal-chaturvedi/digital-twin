@@ -1,0 +1,45 @@
+name: Deploy to Hugging Face Space
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Only the newest push needs to reach the Space
+concurrency:
+  group: deploy-space
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Skip until the Space is configured, so pushes don't fail before setup
+    if: vars.HF_SPACE != ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      # Upload only what the Space needs. The Space gets its own README (which holds the
+      # Space config), and requirements.txt is generated from uv.lock so the two can't drift apart.
+      - name: Prepare Space files
+        run: |
+          mkdir deploy
+          cp space/README.md deploy/
+          cp app.py deploy/
+          cp -r digital_twin deploy/
+          uv export --frozen --format requirements-txt --no-hashes --no-dev --no-emit-project -o deploy/requirements.txt
+
+      - name: Upload to Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_DEPLOY_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        # --delete removes files under digital_twin/ that no longer exist in the repo
+        run: >
+          uvx --from huggingface_hub==2.4.0 hf upload "$HF_SPACE" deploy .
+          --repo-type space
+          --delete "digital_twin/*"
+          --commit-message "Deploy ${GITHUB_SHA::7} from GitHub"
