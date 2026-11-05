@@ -45,32 +45,11 @@ The model, not the code, decides when the loop ends. Because of that, the code a
 
 ### Data storage
 
-Contact details and unanswered questions are written to a **private Hugging Face Dataset**. A Space's disk is wiped whenever it restarts, so nothing can be kept locally for long.
+Contact details and unanswered questions are written to a **private Hugging Face Dataset**. A Render web server's disk is wiped whenever it restarts, so nothing can be kept locally for long.
 
 - Records are appended to local [JSON Lines](https://jsonlines.org/) files, and a background uploader (`huggingface_hub`'s `CommitScheduler`) pushes any changes to the dataset every minute. Writing to the chat stays fast, and the dataset doesn't get one commit per record.
-- Each app run writes to its own files (`contacts/<run-id>.jsonl`, `questions/<run-id>.jsonl`). A restarted Space starts with an empty folder, so reusing a file name would overwrite what's already on the Hub.
 - The app refuses to write if the dataset is public, and it caps the length of every stored field.
 - Storage is only set up the first time it's needed. Without it, the chat still works, and the agent tells the visitor it couldn't save their details.
-
-To read the data:
-
-```python
-from datasets import load_dataset
-
-contacts = load_dataset("<user>/<dataset>", data_files="contacts/*.jsonl", split="train")
-```
-
-### Project layout
-
-| File | Purpose |
-|---|---|
-| `app.py` | Entry point: Gradio app and the agent loop |
-| `digital_twin/context.py` | Builds the system prompt from the LinkedIn profile |
-| `digital_twin/tools.py` | Tool functions, their JSON schemas and the tool-call handler |
-| `digital_twin/styles.py` | UI theme and example prompts |
-| `digital_twin/files/` | Source documents (LinkedIn profile PDF) |
-| `space/README.md` | Hugging Face Space configuration and description |
-| `.github/workflows/deploy-space.yml` | Deploys the app to the Space on every push to `main` |
 
 ## Running locally
 
