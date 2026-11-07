@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import logging
 from datetime import datetime
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 MAX_MESSAGE_LENGTH = int(os.getenv("GUARD_MAX_MESSAGE_LENGTH", "500"))
 MAX_HISTORY_TURNS = int(os.getenv("GUARD_MAX_HISTORY_TURNS", "20"))
 MAX_TOKENS_REPLY = int(os.getenv("GUARD_MAX_TOKENS_REPLY", "1024"))
+MAX_FIELD_LENGTH = int(os.getenv("GUARD_MAX_FIELD_LENGTH", "2000"))
 
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("GUARD_RATE_LIMIT_WINDOW", "60"))
 RATE_LIMIT_REQUESTS_PER_WINDOW = int(os.getenv("GUARD_RATE_LIMIT_REQUESTS", "30"))
@@ -20,6 +22,7 @@ CIRCUIT_BREAKER_OPEN_DURATION = int(os.getenv("GUARD_CIRCUIT_OPEN_TIME", "300"))
 PER_SESSION_WRITE_LIMIT = int(os.getenv("GUARD_PER_SESSION_WRITE_LIMIT", "5"))
 RECORD_USER_DETAILS_LIMIT = int(os.getenv("GUARD_RECORD_USER_DETAILS_LIMIT", "3"))
 RECORD_QUESTION_LIMIT = int(os.getenv("GUARD_RECORD_QUESTION_LIMIT", "5"))
+REPEATED_PATTERN_THRESHOLD = int(os.getenv("GUARD_REPEATED_PATTERN_THRESHOLD", "3"))
 
 
 class GuardError(Exception):
@@ -183,4 +186,148 @@ class SessionToolLimiter:
 
 
 session_tool_limiter = SessionToolLimiter()
+
+
+class InputValidator:
+    """Validate and sanitize input data before storage."""
+    
+    # Email validation pattern (simplified RFC 5322 compliant)
+    EMAIL_PATTERN = re.compile(
+        r'^(?:[a-zA-Z0-9!#$%&\'*+/=^_`{|}~-]+(?:\.[a-zA-Z0-9!#$%&\'*+/=^_`{|}~-]+)*|'
+        r'"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")'
+        r'@(?:(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?|'
+        r'\[(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\])$'
+    )
+    
+    # Characters to strip (control characters except newline, tab, carriage return)
+    CONTROL_CHARS = ''.join(chr(i) for i in range(0x00, 0x08)) + \
+                    ''.join(chr(i) for i in range(0x0B, 0x0C)) + \
+                    ''.join(chr(i) for i in range(0x0E, 0x20)) + \
+                    '\x7F'  # DEL character
+    
+    @classmethod
+    def validate_email(cls, email: str) -> tuple[bool, str | None]:
+        """Validate email format and basic domain checks."""
+        if not isinstance(email, str):
+            logger.warning("guard_invalid_email", extra={"error": "not_string"})
+            return False, "Email must be a string."
+        
+        if len(email) > 254:
+            logger.warning("guard_invalid_email", extra={"error": "too_long"})
+            return False, "Email must be no more than 254 characters."
+        
+        email = email.strip()
+        if not cls.EMAIL_PATTERN.fullmatch(email):
+            logger.warning("guard_email_format_mismatch")
+            return False, "Invalid email format."
+        
+        # Check for obvious spam patterns
+        local_part = email.split('@')[0].lower()
+        domain = email.split('@')[1].lower()
+        
+        # Check for all-numeric local part (common in spam)
+        if local_part.isdigit() and len(local_part) > 5:
+            logger.warning("guard_invalid_email_spam_pattern", extra={"pattern": "all_numeric_local"})
+            return False, "Please provide a valid email address."
+        
+        # Check for suspicious domains
+        if cls._is_suspicious_domain(domain):
+            logger.warning("guard_invalid_email_suspicious_domain", extra={"domain": domain})
+            return False, "Please provide a valid email address."
+        
+        return True, None
+    
+    @classmethod
+    def _is_suspicious_domain(cls, domain: str) -> bool:
+        """Check for obviously fake/spam domains."""
+        # List of suspicious TLDs or patterns
+        suspicious_patterns = [
+            'tempmail', 'throwaway', 'guerrilla', 'mailinator', 'trashmail',
+            'fakeinbox', 'spam', 'junk', 'disposable', 'getairmail',
+            'mailnesia', 'mohmal', 'yopmail', 'dispostable', 'spamgourmet'
+        ]
+        domain_lower = domain.lower()
+        for pattern in suspicious_patterns:
+            if pattern in domain_lower:
+                return True
+        return False
+    
+    @classmethod
+    def strip_control_characters(cls, text: str) -> str:
+        """Remove control characters and excessive whitespace."""
+        if not isinstance(text, str):
+            logger.warning("guard_invalid_input_type")
+            raise GuardError("Input must be a string", "Your input format wasn't recognized.")
+        
+        # Remove control characters except newline, tab, carriage return
+        cleaned = ''.join(c for c in text if c not in cls.CONTROL_CHARS)
+        
+        # Strip multiple newlines to a single one
+        cleaned = re.sub(r'\n{2,}', '\n', cleaned)
+        # Strip multiple tabs to a single one
+        cleaned = re.sub(r'\t{2,}', '\t', cleaned)
+        # Strip multiple carriage returns to a single one
+        cleaned = re.sub(r'\r{2,}', '\r', cleaned)
+        
+        return cleaned
+    
+    @classmethod
+    def validate_field_length(cls, field: str, max_length: int | None = None) -> tuple[bool, str | None]:
+        """Ensure fields don't exceed maximum allowed length."""
+        max_len = max_length or MAX_FIELD_LENGTH
+        if len(field) > max_len:
+            logger.warning("guard_field_length_exceeded", extra={"length": len(field), "max": max_len})
+            return False, f"Field must be no more than {max_len} characters."
+        return True, None
+    
+    @classmethod
+    def deduplicate_input(cls, text: str) -> str:
+        """Remove repeated sequences (e.g., spam with 'a\\nb\\na\\nb' pattern)."""
+        if len(text) < 6:
+            return text
+        
+        # Check for consecutive repeated patterns (e.g., "spam spam spam" -> "spam")
+        # Look for patterns up to 64 chars that repeat consecutively
+        max_pattern_len = min(len(text), 64)
+        
+        for pattern_len in range(1, max_pattern_len + 1):
+            # Check if the text consists of consecutive repetitions of a pattern
+            pattern = text[:pattern_len]
+            if len(pattern) < 1:
+                continue
+            
+            # Count consecutive repetitions at the start
+            repetitions = 1
+            pos = pattern_len
+            while pos + pattern_len <= len(text) and text[pos:pos + pattern_len] == pattern:
+                repetitions += 1
+                pos += pattern_len
+            
+            # If we found enough consecutive repetitions, collapse them
+            if repetitions > REPEATED_PATTERN_THRESHOLD:
+                logger.warning("guard_repeated_pattern", extra={"pattern": pattern[:20], "count": repetitions})
+                # Replace the consecutive repetitions with a single instance
+                # But only if the entire text is just this repetition (or mostly)
+                # For safety, only collapse if repetitions cover most of the text
+                if pos >= len(text) * 0.8:  # Pattern covers 80%+ of text
+                    return pattern
+        
+        # Also check for repeated substring patterns (non-consecutive but frequent)
+        # Simple check: if a short substring appears too many times
+        if len(text) >= 20:
+            for check_len in [2, 3, 4, 5, 8, 16, 32]:
+                if check_len > len(text) // 2:
+                    continue
+                for start in range(0, len(text) - check_len + 1, check_len):
+                    pattern = text[start:start + check_len]
+                    count = text.count(pattern)
+                    if count > REPEATED_PATTERN_THRESHOLD and count * check_len >= len(text) * 0.5:
+                        logger.warning("guard_repeated_pattern", extra={"pattern": pattern[:20], "count": count})
+                        # This is likely spam/gibberish
+                        return pattern
+        
+        return text
+
+
+input_validator = InputValidator()
 
