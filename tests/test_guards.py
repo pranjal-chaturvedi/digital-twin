@@ -5,6 +5,7 @@ from digital_twin.guards import (
     SlidingWindowRateLimiter,
     DailyBudgetGuard,
     CircuitBreaker,
+    SessionToolLimiter,
     GuardError,
     MAX_MESSAGE_LENGTH,
     MAX_HISTORY_TURNS,
@@ -84,6 +85,26 @@ class TestGuards(unittest.TestCase):
 
         cb.record_success()
         self.assertTrue(cb.can_proceed())
+
+    def test_per_session_write_limit(self):
+        limiter = SessionToolLimiter(write_tool_limit=2, tool_limits={"record_user_details": 2})
+        session = "session_1"
+
+        allowed, msg = limiter.check_and_record_write_call(session, "record_user_details")
+        self.assertTrue(allowed)
+        self.assertIsNone(msg)
+
+        allowed, msg = limiter.check_and_record_write_call(session, "record_user_details")
+        self.assertTrue(allowed)
+        self.assertIsNone(msg)
+
+        allowed, msg = limiter.check_and_record_write_call(session, "record_user_details")
+        self.assertFalse(allowed)
+        self.assertIsNotNone(msg)
+        self.assertIn("limit", msg.lower())
+
+        status = limiter.get_session_status(session)
+        self.assertEqual(status.get("record_user_details"), 2)
 
 
 if __name__ == "__main__":

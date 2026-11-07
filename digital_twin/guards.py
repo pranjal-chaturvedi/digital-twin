@@ -17,6 +17,10 @@ RATE_LIMIT_REQUESTS_PER_WINDOW = int(os.getenv("GUARD_RATE_LIMIT_REQUESTS", "30"
 DAILY_BUDGET_REQUESTS = int(os.getenv("GUARD_DAILY_BUDGET", "1000"))
 CIRCUIT_BREAKER_OPEN_DURATION = int(os.getenv("GUARD_CIRCUIT_OPEN_TIME", "300"))
 
+PER_SESSION_WRITE_LIMIT = int(os.getenv("GUARD_PER_SESSION_WRITE_LIMIT", "5"))
+RECORD_USER_DETAILS_LIMIT = int(os.getenv("GUARD_RECORD_USER_DETAILS_LIMIT", "3"))
+RECORD_QUESTION_LIMIT = int(os.getenv("GUARD_RECORD_QUESTION_LIMIT", "5"))
+
 
 class GuardError(Exception):
     def __init__(self, message, user_friendly_message=None):
@@ -147,4 +151,36 @@ class CircuitBreaker:
 rate_limiter = SlidingWindowRateLimiter(RATE_LIMIT_REQUESTS_PER_WINDOW, RATE_LIMIT_WINDOW_SECONDS)
 daily_budget = DailyBudgetGuard(DAILY_BUDGET_REQUESTS)
 circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=CIRCUIT_BREAKER_OPEN_DURATION)
+
+
+class SessionToolLimiter:
+    def __init__(self, write_tool_limit: int = PER_SESSION_WRITE_LIMIT, tool_limits: dict[str, int] | None = None):
+        self.default_limit = write_tool_limit
+        self.tool_limits = tool_limits or {
+            "record_user_details": RECORD_USER_DETAILS_LIMIT,
+            "record_unknown_question": RECORD_QUESTION_LIMIT,
+        }
+        self.write_tool_calls = defaultdict(lambda: defaultdict(int))
+
+    def check_and_record_write_call(self, session_id: str, tool_name: str, arguments: dict | None = None) -> tuple[bool, str | None]:
+        """Check if write tool call is allowed for session_id and increment count if allowed."""
+        if not tool_name:
+            return True, None
+
+        limit = self.tool_limits.get(tool_name, self.default_limit)
+        current_count = self.write_tool_calls[session_id][tool_name]
+
+        if current_count >= limit:
+            logger.warning("guard_write_tool_limit_exceeded", extra={"session": session_id, "tool": tool_name})
+            return False, f"You've reached your limit of recording interactions for tool '{tool_name}'."
+
+        self.write_tool_calls[session_id][tool_name] += 1
+        return True, None
+
+    def get_session_status(self, session_id: str) -> dict[str, int]:
+        """Returns counts for each write tool per session."""
+        return dict(self.write_tool_calls[session_id])
+
+
+session_tool_limiter = SessionToolLimiter()
 
