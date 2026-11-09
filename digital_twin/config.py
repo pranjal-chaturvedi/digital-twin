@@ -64,11 +64,15 @@ DAILY_BUDGET_MODEL_CALLS = _int_env("GUARD_DAILY_BUDGET", 1000)
 CIRCUIT_BREAKER_FAILURE_THRESHOLD = _int_env("GUARD_CIRCUIT_FAILURE_THRESHOLD", 5)
 CIRCUIT_BREAKER_OPEN_DURATION = _int_env("GUARD_CIRCUIT_OPEN_TIME", 300)
 
-# Write-tool limits per session
-PER_SESSION_WRITE_LIMIT = _int_env("GUARD_PER_SESSION_WRITE_LIMIT", 5)
-RECORD_USER_DETAILS_LIMIT = _int_env("GUARD_RECORD_USER_DETAILS_LIMIT", 3)
-RECORD_QUESTION_LIMIT = _int_env("GUARD_RECORD_QUESTION_LIMIT", 5)
-REPEATED_PATTERN_THRESHOLD = _int_env("GUARD_REPEATED_PATTERN_THRESHOLD", 3)
+# Write tools. Gradio's session_hash is chosen by the client, so per-session caps alone
+# can be dodged by opening new sessions; the per-client cap (keyed like the rate limiter)
+# bounds writes across all of one client's sessions.
+RECORD_USER_DETAILS_LIMIT = _int_env("GUARD_RECORD_USER_DETAILS_LIMIT", 3)  # per session
+RECORD_QUESTION_LIMIT = _int_env("GUARD_RECORD_QUESTION_LIMIT", 5)  # per session
+SESSION_WRITE_WINDOW_SECONDS = 24 * 60 * 60  # how long a session's write count is remembered
+CLIENT_WRITE_LIMIT = _int_env("GUARD_CLIENT_WRITE_LIMIT", 10)  # all write tools, per client
+CLIENT_WRITE_WINDOW_SECONDS = _int_env("GUARD_CLIENT_WRITE_WINDOW", 60 * 60)
+MAX_NAME_LENGTH = _int_env("GUARD_MAX_NAME_LENGTH", 100)
 
 # Storage backend for limiters and counters. Only the in-process backend exists;
 # any other value is rejected so a typo can't silently disable limiting.

@@ -49,7 +49,7 @@ def client(monkeypatch):
     monkeypatch.setattr(app, "circuit_breaker", CircuitBreaker(5, 300))
     monkeypatch.setattr(
         app, "handle_tool_calls",
-        lambda calls: [{"role": "tool", "content": '"OK"', "tool_call_id": c.id} for c in calls],
+        lambda calls, caller: [{"role": "tool", "content": '"OK"', "tool_call_id": c.id} for c in calls],
     )
     return fake
 
@@ -212,3 +212,34 @@ def test_model_failure_logs_only_the_error_type(client, caplog):
         app.chat("my email is secret@example.com", [])
     assert "RuntimeError" in caplog.text
     assert "secret@example.com" not in caplog.text
+
+
+# --- Tool caller ---------------------------------------------------------------
+
+def test_tool_caller_uses_session_and_client():
+    request = SimpleNamespace(session_hash="abc123")
+    caller = app.tool_caller(request, "203.0.113.7")
+    assert caller.session_id == "abc123"
+    assert caller.client_id == "203.0.113.7"
+
+
+@pytest.mark.parametrize("session_hash", [None, "", 42])
+def test_tool_caller_without_session_falls_back_to_client(session_hash):
+    caller = app.tool_caller(SimpleNamespace(session_hash=session_hash), "203.0.113.7")
+    assert caller.session_id == "client:203.0.113.7"
+
+
+def test_tool_calls_receive_the_caller(client, monkeypatch):
+    seen = []
+
+    def fake_handle(calls, caller):
+        seen.append(caller)
+        return [{"role": "tool", "content": '"OK"', "tool_call_id": c.id} for c in calls]
+
+    monkeypatch.setattr(app, "handle_tool_calls", fake_handle)
+    client.tool_rounds = 1
+    request = SimpleNamespace(
+        headers={}, client=SimpleNamespace(host="198.51.100.2"), session_hash="sess-1"
+    )
+    app.chat("Hello", [], request)
+    assert seen == [app.ToolCaller(session_id="sess-1", client_id="198.51.100.2")]

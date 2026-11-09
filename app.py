@@ -9,6 +9,7 @@ from digital_twin.config import MAX_TOOL_ROUNDS, MAX_TOKENS_REPLY, QUEUE_MAX_SIZ
 from digital_twin.ratelimit import client_key, rate_limiter
 from digital_twin.spend import daily_budget, circuit_breaker
 from digital_twin.guards import validate_message, prepare_history, GuardError
+from digital_twin.toolguards import ToolCaller
 from dotenv import load_dotenv
 import gradio as gr
 import os
@@ -35,6 +36,14 @@ def get_client() -> OpenAI:
     return OpenAI(base_url=BASE_URL, api_key=API_KEY)
 
 
+def tool_caller(request, client_id: str) -> ToolCaller:
+    """Identify who tool writes are made for. Without a Gradio session, fall back to the
+    client, so sessionless callers share their client's caps rather than one global bucket."""
+    session_hash = getattr(request, "session_hash", None)
+    session_id = session_hash if isinstance(session_hash, str) and session_hash else f"client:{client_id}"
+    return ToolCaller(session_id=session_id, client_id=client_id)
+
+
 class BudgetExhausted(Exception):
     """The daily model-call budget ran out; reply without calling the model."""
 
@@ -59,7 +68,8 @@ def _complete(messages, **kwargs):
 def chat(message, history, request: gr.Request = None):
     # Cheap checks first; only the model calls below cost money.
     # 1. Per-client rate limit (counts invalid requests too, so they can't be used to flood)
-    if not rate_limiter.allow(client_key(request)):
+    client_id = client_key(request)
+    if not rate_limiter.allow(client_id):
         return RATE_LIMITED_REPLY
 
     # 2. Reject bad input before it costs any budget
@@ -78,6 +88,7 @@ def chat(message, history, request: gr.Request = None):
         return CIRCUIT_OPEN_REPLY
 
     messages = system + prepare_history(history) + [{"role": "user", "content": message}]
+    caller = tool_caller(request, client_id)
 
     try:
         for _ in range(MAX_TOOL_ROUNDS):
@@ -85,7 +96,7 @@ def chat(message, history, request: gr.Request = None):
             if not reply.tool_calls:
                 return reply.content or FALLBACK_REPLY
             messages.append(reply.model_dump(exclude_none=True))
-            messages.extend(handle_tool_calls(reply.tool_calls))
+            messages.extend(handle_tool_calls(reply.tool_calls, caller))
 
         # Tool rounds used up: forbid further tool calls so the model must answer with what it has
         reply = _complete(messages, tool_choice="none").choices[0].message

@@ -11,6 +11,14 @@ from dotenv import load_dotenv
 from huggingface_hub import CommitScheduler
 
 from digital_twin.config import MAX_FIELD_LENGTH
+from digital_twin.toolguards import (
+    ToolCaller,
+    ToolInputError,
+    clean_name,
+    clean_text,
+    normalise_email,
+    write_guard,
+)
 
 load_dotenv(override=True)
 
@@ -57,19 +65,24 @@ def _append_record(table, record):
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def _clip(value):
-    """Cap a model-supplied value so one call can't store an arbitrarily large blob."""
-    return str(value)[:MAX_FIELD_LENGTH]
+# Each write tool validates its model-supplied arguments and returns
+# (table, record to store, dedupe key). Signatures must match the JSON schemas below.
 
-
-def record_user_details(email, name="Name not provided", notes="not provided"):
-    _append_record("contacts", {"name": _clip(name), "email": _clip(email), "notes": _clip(notes)})
-    return "OK"
+def record_user_details(email, name=None, notes=None):
+    email = normalise_email(email)
+    record = {
+        "name": clean_name(name) or "Name not provided",
+        "email": email,
+        "notes": clean_text(notes, MAX_FIELD_LENGTH) or "not provided",
+    }
+    return "contacts", record, email.lower()
 
 
 def record_unknown_question(question):
-    _append_record("questions", {"question": _clip(question)})
-    return "OK"
+    question = clean_text(question, MAX_FIELD_LENGTH)
+    if not question:
+        raise ToolInputError("The question is empty. Pass the user's question as text.")
+    return "questions", {"question": question}, " ".join(question.casefold().split())
 
 
 record_user_details_json = {
@@ -114,14 +127,25 @@ tool_map = {
 }
 
 
-def _run_tool(tool_name, raw_arguments):
-    """Run one tool call; problems come back as {"error": ...} for the model to read and correct."""
+LIMIT_REACHED_ERROR = (
+    "Recording limit reached for now. Do not call this tool again in this conversation; "
+    "tell the user you couldn't save it this time."
+)
+ALREADY_RECORDED = "Already recorded; nothing more to do."
+
+
+def _run_tool(tool_name, raw_arguments, caller: ToolCaller):
+    """Run one tool call; problems come back as {"error": ...} for the model to read and correct.
+
+    Order: parse -> validate/clean -> dedupe -> write caps -> store. Duplicates and invalid
+    input don't use up the caps; only writes that are about to be stored do.
+    """
     tool = tool_map.get(tool_name)
     if tool is None:
-        return {"error": f"Unknown tool: {tool_name}"}
+        return {"error": "Unknown tool. Use only the tools you were given."}
     try:
         arguments = json.loads(raw_arguments)
-    except json.JSONDecodeError:
+    except (TypeError, json.JSONDecodeError):
         return {"error": "Arguments were not valid JSON. Retry with a JSON object matching the tool schema."}
     if not isinstance(arguments, dict):
         return {"error": "Arguments must be a JSON object matching the tool schema."}
@@ -130,21 +154,37 @@ def _run_tool(tool_name, raw_arguments):
         inspect.signature(tool).bind(**arguments)
     except TypeError as e:
         return {"error": f"Invalid arguments: {e}"}
+
     try:
-        return tool(**arguments)
+        table, record, dedupe_key = tool(**arguments)
+    except ToolInputError as e:
+        print(f"Tool input rejected: {tool_name}", flush=True)
+        return {"error": str(e)}
+
+    if write_guard.is_duplicate(caller, tool_name, dedupe_key):
+        return ALREADY_RECORDED
+    if not write_guard.allow(caller, tool_name):
+        print(f"Tool limit reached: {tool_name}", flush=True)
+        return {"error": LIMIT_REACHED_ERROR}
+
+    try:
+        _append_record(table, record)
     except Exception as e:
         # Arguments may hold PII (emails, names), so log only the error type
         print(f"Tool failed: {tool_name} ({type(e).__name__})", flush=True)
         return {"error": f"The tool failed with {type(e).__name__}. Do not retry; tell the user it didn't work."}
+    write_guard.mark_written(caller, tool_name, dedupe_key)
+    return "OK"
 
 
-def handle_tool_calls(tool_calls):
+def handle_tool_calls(tool_calls, caller: ToolCaller):
     # Every tool_call must get exactly one tool reply, or the next API call is rejected
     results = []
     for tool_call in tool_calls:
         tool_name = tool_call.function.name
-        print(f"Tool called: {tool_name}", flush=True)
-        result = _run_tool(tool_name, tool_call.function.arguments)
+        # The name comes from the model, so only known names reach the log
+        print(f"Tool called: {tool_name if tool_name in tool_map else '<unknown>'}", flush=True)
+        result = _run_tool(tool_name, tool_call.function.arguments, caller)
         results.append(
             {"role": "tool", "content": json.dumps(result), "tool_call_id": tool_call.id}
         )
