@@ -1,0 +1,88 @@
+name: CI
+
+# Branching: `develop` is the default branch; feature/* and hotfix/* branch from it.
+# Render deploys `main` by itself on every push, so this workflow never deploys.
+# It tests every change headed for develop or main, and creates a GitHub release
+# when a new version lands on main.
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+# One run per branch or PR; a newer push cancels an older test run,
+# but a run on main is never cancelled halfway through a release.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      # The suite needs no secrets: the model is faked and nothing is written to the dataset.
+      # --locked fails if uv.lock is out of date with pyproject.toml.
+      - name: Run tests
+        run: uv run --locked pytest -q
+
+  release:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # all tags, to tell whether this version is already released
+
+      - name: Read version
+        id: version
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check for an existing release
+        id: existing
+        run: |
+          if git rev-parse --verify --quiet "refs/tags/${{ steps.version.outputs.tag }}" >/dev/null; then
+            echo "${{ steps.version.outputs.tag }} already exists; bump the version in pyproject.toml to release again."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Release notes are this version's section of CHANGELOG.md ("## [x.y.z] - date")
+      - name: Extract release notes
+        if: steps.existing.outputs.exists == 'false'
+        run: |
+          # Plain prefix matching (no regex), so dots in the version are literal
+          awk -v heading="## [${{ steps.version.outputs.version }}]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && (index($0, "## [") == 1 || index($0, "[") == 1 && index($0, "]: ") > 0) { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::CHANGELOG.md has no section for ${{ steps.version.outputs.version }}. Add '## [${{ steps.version.outputs.version }}] - <date>' before releasing."
+            exit 1
+          fi
+
+      - name: Create release
+        if: steps.existing.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --target "$GITHUB_SHA" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --notes-file release-notes.md
