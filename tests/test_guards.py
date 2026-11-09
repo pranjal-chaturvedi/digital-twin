@@ -8,7 +8,6 @@ from digital_twin.guards import (
     SessionToolLimiter,
     GuardError,
     MAX_MESSAGE_LENGTH,
-    MAX_HISTORY_TURNS,
     InputValidator,
     MAX_FIELD_LENGTH,
     REPEATED_PATTERN_THRESHOLD,
@@ -18,23 +17,25 @@ from digital_twin.guards import (
 class TestGuards(unittest.TestCase):
     def test_validate_message_valid(self):
         # Should not raise exception
-        validate_message("Hello world!", [])
+        validate_message("Hello world!")
 
     def test_validate_message_too_long(self):
         long_msg = "a" * (MAX_MESSAGE_LENGTH + 1)
         with self.assertRaises(GuardError) as cm:
-            validate_message(long_msg, [])
+            validate_message(long_msg)
         self.assertIn("too long", cm.exception.user_friendly_message.lower())
+
+    def test_validate_message_at_limit(self):
+        validate_message("a" * MAX_MESSAGE_LENGTH)
 
     def test_validate_message_invalid_type(self):
         with self.assertRaises(GuardError):
-            validate_message(12345, [])  # type: ignore
+            validate_message(12345)  # type: ignore
 
-    def test_validate_history_too_long(self):
-        long_history = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}] * (MAX_HISTORY_TURNS + 5)
-        with self.assertRaises(GuardError) as cm:
-            validate_message("short msg", long_history)
-        self.assertIn("history", cm.exception.user_friendly_message.lower())
+    def test_validate_message_empty(self):
+        for msg in ["", "   ", "\n\t"]:
+            with self.assertRaises(GuardError):
+                validate_message(msg)
 
     def test_get_client_ip_forwarded(self):
         headers = {"X-Forwarded-For": "203.0.113.195, 70.41.3.18"}

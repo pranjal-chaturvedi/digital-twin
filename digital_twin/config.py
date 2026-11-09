@@ -32,6 +32,8 @@ def _int_env(name: str, default: int, minimum: int = 1) -> int:
 # Input and output caps
 MAX_MESSAGE_LENGTH = _int_env("GUARD_MAX_MESSAGE_LENGTH", 500)
 MAX_HISTORY_TURNS = _int_env("GUARD_MAX_HISTORY_TURNS", 20)
+# History comes from the client, so cap its total size too, not just the turn count
+MAX_HISTORY_CHARS = _int_env("GUARD_MAX_HISTORY_CHARS", 12000)
 MAX_TOKENS_REPLY = _int_env("GUARD_MAX_TOKENS_REPLY", 1024)
 MAX_FIELD_LENGTH = _int_env("GUARD_MAX_FIELD_LENGTH", 2000)
 MAX_TOOL_ROUNDS = _int_env("MAX_TOOL_ROUNDS", 5)

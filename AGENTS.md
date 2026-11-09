@@ -8,7 +8,8 @@ A Gradio chat app (`app.py`) that answers questions as a "digital twin" using an
 - `digital_twin/config.py`: every env-driven limit, with safe defaults. Add new limits here, not inline.
 - `digital_twin/guards.py`: abuse-protection guards (caps, rate limiter, budget, circuit breaker, tool limits, input validation).
 - `tests/`: pytest suite.
-- `docs/audit.md`: where each guard hooks in and what's still open. Read it instead of re-auditing the repo.
+- `.context/` (untracked): planning notes, including `roadmap.md` and `audit.md` (where each guard hooks in and what's still open). Read the audit instead of re-auditing the repo.
+- `docs/`: project documentation only. Planning and audit notes go in `.context/`.
 
 ## Rules
 - **Stay framework-free.** Plain Python plus the existing dependencies; no web frameworks, DI containers or validation libraries.

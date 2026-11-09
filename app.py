@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from openai import OpenAI
 from digital_twin.context import TWIN_SYSTEM_PROMPT
 from digital_twin.tools import tools, handle_tool_calls
@@ -5,6 +7,7 @@ from digital_twin.styles import CSS, JS, EXAMPLES
 from digital_twin.config import MAX_TOOL_ROUNDS
 from digital_twin.guards import (
     validate_message,
+    prepare_history,
     get_client_ip,
     rate_limiter,
     daily_budget,
@@ -24,58 +27,46 @@ API_KEY = os.getenv("MODEL_API_KEY")
 
 FALLBACK_REPLY = "Sorry, I couldn't put together an answer to that. Could you try rephrasing?"
 
-openai = OpenAI(base_url=BASE_URL, api_key=API_KEY)
-
 system = [{"role": "system", "content": TWIN_SYSTEM_PROMPT}]
 
 
-def _to_model_messages(history):
-    """Reduce Gradio chat history to plain role/content dicts the model API accepts."""
-    cleaned = []
-    for msg in history:
-        content = msg["content"]
-        if isinstance(content, str):
-            text = content
-        else:
-            # Gradio 6 gives a list of parts; keep only the text ones (drops files, components)
-            text = "\n".join(
-                part["text"] for part in content if isinstance(part, dict) and part.get("type") == "text"
-            )
-        if text:
-            cleaned.append({"role": msg["role"], "content": text})
-    return cleaned
+@lru_cache(maxsize=1)
+def get_client() -> OpenAI:
+    """Create the model client on first use, so the module imports without credentials."""
+    return OpenAI(base_url=BASE_URL, api_key=API_KEY)
 
 
 def chat(message, history, request: gr.Request = None):
-    # 1. Check circuit breaker state
+    # Cheap checks first; nothing below the budget check is free.
+    # 1. Upstream health
     if not circuit_breaker.can_proceed():
         return "Service is temporarily experiencing high error rates. Please try again shortly."
 
-    # 2. Extract client IP and check per-client rate limit
+    # 2. Per-client rate limit (counts invalid requests too, so they can't be used to flood)
     headers = request.headers if request and hasattr(request, "headers") else {}
     client_ip = get_client_ip(headers)
-    
+
     allowed, rate_limit_msg = rate_limiter.check_rate_limit(client_ip)
     if not allowed:
         return rate_limit_msg
 
-    # 3. Check global daily request budget
+    # 3. Reject bad input before it costs any budget
+    try:
+        validate_message(message)
+    except GuardError as e:
+        return e.user_friendly_message
+
+    # 4. Global daily budget, charged only for requests that will reach the model
     allowed, budget_msg = daily_budget.check_budget()
     if not allowed:
         return budget_msg
 
-    # 4. Validate message and history length
-    try:
-        validate_message(message, history)
-    except GuardError as e:
-        return e.user_friendly_message
+    messages = system + prepare_history(history) + [{"role": "user", "content": message}]
+    client = get_client()
 
-    messages = system + \
-        _to_model_messages(history) + [{"role": "user", "content": message}]
-    
     try:
         for _ in range(MAX_TOOL_ROUNDS):
-            response = openai.chat.completions.create(
+            response = client.chat.completions.create(
                 model=MODEL_NAME, messages=messages, tools=tools, max_tokens=MAX_TOKENS_REPLY)  # type: ignore
             reply = response.choices[0].message
             if not reply.tool_calls:
@@ -83,14 +74,14 @@ def chat(message, history, request: gr.Request = None):
                 return reply.content or FALLBACK_REPLY
             messages.append(reply.model_dump(exclude_none=True))
             messages.extend(handle_tool_calls(reply.tool_calls))
-        
+
         # Tool budget spent: forbid further tool calls so the model must answer with what it has
-        response = openai.chat.completions.create(
+        response = client.chat.completions.create(
             model=MODEL_NAME, messages=messages, tools=tools, tool_choice="none", max_tokens=MAX_TOKENS_REPLY  # type: ignore
         )
         circuit_breaker.record_success()
         return response.choices[0].message.content or FALLBACK_REPLY
-    except Exception as e:
+    except Exception:
         circuit_breaker.record_failure()
         return FALLBACK_REPLY
 
