@@ -25,7 +25,7 @@ load_dotenv(override=True)
 HF_DATASET_REPO = os.getenv("HF_DATASET_REPO")
 PUSH_EVERY_MINUTES = 1
 
-# A Space starts each run with an empty disk. Reusing a file name would overwrite the
+# A Render instance starts each run with an empty disk. Reusing a file name would overwrite the
 # copy already on the Hub instead of adding to it, so every run writes its own files.
 _RUN_ID = uuid.uuid4().hex
 _scheduler = None

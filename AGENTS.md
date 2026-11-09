@@ -3,7 +3,7 @@
 Instructions for AI coding agents working in this repo. This file is the single source of truth; tool-specific files (CLAUDE.md, etc.) only point here.
 
 ## Project
-A Gradio chat app (`app.py`) that answers questions as a "digital twin" using an OpenAI-compatible model, with two write tools (`digital_twin/tools.py`) that store contacts and unanswered questions in a private Hugging Face dataset. Deployed on Render.
+A Gradio chat app (`app.py`) that answers questions as a "digital twin" using an OpenAI-compatible model, with two write tools (`digital_twin/tools.py`) that store contacts and unanswered questions in a private Hugging Face dataset. Deployed on Render, which deploys every push to `main` by itself.
 
 - `digital_twin/config.py`: every env-driven limit, with safe defaults. Add new limits here, not inline.
 - Abuse-protection guards, all wired into `app.py: chat`:
@@ -11,10 +11,11 @@ A Gradio chat app (`app.py`) that answers questions as a "digital twin" using an
   - `digital_twin/ratelimit.py`: client identification (`X-Forwarded-For` from the right) and the per-client rate limiter.
   - `digital_twin/spend.py`: daily model-call budget and the model-API circuit breaker.
   - `digital_twin/toolguards.py`: write-tool input cleaning, per-session/per-client write caps and dedupe (used by `digital_twin/tools.py`).
+- `scripts/check_client_ip.py`: manual post-deploy check that `TRUSTED_PROXY_COUNT` is right (no model calls).
 - `tests/`: pytest suite.
   - `tests/fixtures/adversarial.json`: adversarial cases (prompt extraction, jailbreaks, contact spam, long inputs, multilingual, forged headers). `tests/test_adversarial.py` runs them deterministically with a fake model; `tests/test_adversarial_live.py` runs them against the real model.
 - `.context/` (untracked): planning notes, including `roadmap.md` and `audit.md` (where each guard hooks in and what's still open). Read the audit instead of re-auditing the repo.
-- `docs/`: project documentation only. Planning and audit notes go in `.context/`.
+- `docs/`: project documentation only (architecture, protections, development). Planning and audit notes go in `.context/`. The changelog is `CHANGELOG.md` at the root.
 
 ## Rules
 - **Stay framework-free.** Plain Python plus the existing dependencies; no web frameworks, DI containers or validation libraries.
@@ -24,3 +25,5 @@ A Gradio chat app (`app.py`) that answers questions as a "digital twin" using an
 - **Add no new dependencies without asking first.**
 - **No Redis or other external store.** Limiters and counters keep their in-memory backend behind an interface (`LIMITER_BACKEND=memory`).
 - **Don't read `.env`** or print secret values. Refer to env vars by name only.
+- **Branching:** `develop` is the default branch; branch `feature/*` and `hotfix/*` from it and target PRs at it. Never push to `main`: a push there deploys to production. CI (`.github/workflows/ci.yml`) tests PRs and pushes; it doesn't deploy.
+- **Keep `CHANGELOG.md` updated** under `## [Unreleased]` for user-visible changes (Keep a Changelog format).
