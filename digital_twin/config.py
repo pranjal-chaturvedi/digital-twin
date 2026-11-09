@@ -41,11 +41,20 @@ MAX_TOOL_ROUNDS = _int_env("MAX_TOOL_ROUNDS", 5)
 # Per-client rate limiting
 RATE_LIMIT_WINDOW_SECONDS = _int_env("GUARD_RATE_LIMIT_WINDOW", 60)
 RATE_LIMIT_REQUESTS_PER_WINDOW = _int_env("GUARD_RATE_LIMIT_REQUESTS", 30)
+# Upper bound on clients tracked at once; least recently seen are evicted past it
+RATE_LIMIT_MAX_CLIENTS = _int_env("GUARD_RATE_LIMIT_MAX_CLIENTS", 10000)
 
-# Number of trusted reverse proxies in front of the app (Render's load balancer).
-# The client IP is the X-Forwarded-For entry this many hops from the right.
-# 0 means no trusted proxy: ignore X-Forwarded-For and use the socket address.
-TRUSTED_PROXY_COUNT = _int_env("TRUSTED_PROXY_COUNT", 1, minimum=0)
+# Number of trusted proxies that append to X-Forwarded-For in front of the app.
+# The client IP is the entry this many hops from the right; anything further left
+# was sent by the client and can be forged. 0 = ignore the header, use the socket peer.
+# Render: Cloudflare appends the client IP, then Render's proxy appends Cloudflare's,
+# so the client is 2 from the right. Verify on a live deploy before relying on it.
+TRUSTED_PROXY_COUNT = _int_env("TRUSTED_PROXY_COUNT", 2, minimum=0)
+
+# Gradio queue: requests waiting beyond max size are refused, and at most
+# CONCURRENCY_LIMIT chats run model calls at the same time
+QUEUE_MAX_SIZE = _int_env("GUARD_QUEUE_MAX_SIZE", 20)
+CONCURRENCY_LIMIT = _int_env("GUARD_CONCURRENCY_LIMIT", 4)
 
 # Global spend protection
 DAILY_BUDGET_REQUESTS = _int_env("GUARD_DAILY_BUDGET", 1000)

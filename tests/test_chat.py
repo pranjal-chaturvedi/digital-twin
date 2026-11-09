@@ -5,8 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 import app
-from digital_twin import guards
-from digital_twin.guards import CircuitBreaker, DailyBudgetGuard, SlidingWindowRateLimiter
+from digital_twin import guards, ratelimit
+from digital_twin.guards import CircuitBreaker, DailyBudgetGuard
+from digital_twin.ratelimit import SlidingWindowRateLimiter
 
 
 class _Message:
@@ -79,6 +80,21 @@ def test_rate_limited_request_makes_no_model_call(client, monkeypatch):
     app.chat("first", [])
     app.chat("second", [])
     assert len(client.calls) == 1
+
+
+def test_forged_forwarded_for_does_not_bypass_rate_limit(client, monkeypatch):
+    monkeypatch.setattr(app, "rate_limiter", SlidingWindowRateLimiter(2, 60))
+    monkeypatch.setattr(app, "client_key", lambda r: ratelimit.client_key(r, trusted_proxy_count=2))
+
+    def request(forged):
+        # Cloudflare appends the real client, Render appends Cloudflare's edge
+        xff = f"{forged}, 99.61.165.29, 104.22.17.40"
+        return SimpleNamespace(headers={"x-forwarded-for": xff}, client=SimpleNamespace(host="10.0.0.1"))
+
+    replies = [app.chat("hi", [], request(f"1.2.3.{i}")) for i in range(5)]
+
+    assert len(client.calls) == 2
+    assert replies[2:] == [app.RATE_LIMITED_REPLY] * 3
 
 
 def test_max_tokens_set_on_plain_call(client):

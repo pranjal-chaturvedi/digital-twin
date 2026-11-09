@@ -1,8 +1,6 @@
 import unittest
 from digital_twin.guards import (
     validate_message,
-    get_client_ip,
-    SlidingWindowRateLimiter,
     DailyBudgetGuard,
     CircuitBreaker,
     SessionToolLimiter,
@@ -36,33 +34,6 @@ class TestGuards(unittest.TestCase):
         for msg in ["", "   ", "\n\t"]:
             with self.assertRaises(GuardError):
                 validate_message(msg)
-
-    def test_get_client_ip_forwarded(self):
-        headers = {"X-Forwarded-For": "203.0.113.195, 70.41.3.18"}
-        self.assertEqual(get_client_ip(headers), "203.0.113.195")
-
-    def test_get_client_ip_fallback(self):
-        headers = {"RemoteAddr": "192.168.1.1"}
-        self.assertEqual(get_client_ip(headers), "192.168.1.1")
-
-    def test_get_client_ip_unknown(self):
-        self.assertEqual(get_client_ip({}), "unknown")
-        self.assertEqual(get_client_ip(None), "unknown")
-
-    def test_rate_limiter(self):
-        limiter = SlidingWindowRateLimiter(requests_per_window=2, window_seconds=10)
-        
-        allowed, msg = limiter.check_rate_limit("1.2.3.4")
-        self.assertTrue(allowed)
-        self.assertIsNone(msg)
-
-        allowed, msg = limiter.check_rate_limit("1.2.3.4")
-        self.assertTrue(allowed)
-        self.assertIsNone(msg)
-
-        allowed, msg = limiter.check_rate_limit("1.2.3.4")
-        self.assertFalse(allowed)
-        self.assertIn("Too many requests", msg)
 
     def test_daily_budget_guard(self):
         budget = DailyBudgetGuard(max_requests=2)

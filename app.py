@@ -4,12 +4,11 @@ from openai import OpenAI
 from digital_twin.context import TWIN_SYSTEM_PROMPT
 from digital_twin.tools import tools, handle_tool_calls
 from digital_twin.styles import CSS, JS, EXAMPLES
-from digital_twin.config import MAX_TOOL_ROUNDS
+from digital_twin.config import MAX_TOOL_ROUNDS, QUEUE_MAX_SIZE, CONCURRENCY_LIMIT
+from digital_twin.ratelimit import client_key, rate_limiter
 from digital_twin.guards import (
     validate_message,
     prepare_history,
-    get_client_ip,
-    rate_limiter,
     daily_budget,
     circuit_breaker,
     GuardError,
@@ -26,6 +25,7 @@ BASE_URL = os.getenv("BASE_URL")
 API_KEY = os.getenv("MODEL_API_KEY")
 
 FALLBACK_REPLY = "Sorry, I couldn't put together an answer to that. Could you try rephrasing?"
+RATE_LIMITED_REPLY = "Too many requests. Please wait a moment before trying again."
 
 system = [{"role": "system", "content": TWIN_SYSTEM_PROMPT}]
 
@@ -43,12 +43,8 @@ def chat(message, history, request: gr.Request = None):
         return "Service is temporarily experiencing high error rates. Please try again shortly."
 
     # 2. Per-client rate limit (counts invalid requests too, so they can't be used to flood)
-    headers = request.headers if request and hasattr(request, "headers") else {}
-    client_ip = get_client_ip(headers)
-
-    allowed, rate_limit_msg = rate_limiter.check_rate_limit(client_ip)
-    if not allowed:
-        return rate_limit_msg
+    if not rate_limiter.allow(client_key(request)):
+        return RATE_LIMITED_REPLY
 
     # 3. Reject bad input before it costs any budget
     try:
@@ -98,4 +94,8 @@ if __name__ == "__main__":
             "Ask in the chat to have your details deleted.</sub>"
         ),
         chatbot=gr.Chatbot(show_label=False),
+    ).queue(
+        # A flood waits in a bounded queue instead of piling up slow model calls
+        max_size=QUEUE_MAX_SIZE,
+        default_concurrency_limit=CONCURRENCY_LIMIT,
     ).launch(css=CSS, js=JS, theme=gr.themes.Base())

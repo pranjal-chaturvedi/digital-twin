@@ -11,8 +11,6 @@ from digital_twin.config import (
     MAX_HISTORY_CHARS,
     MAX_TOKENS_REPLY,
     MAX_FIELD_LENGTH,
-    RATE_LIMIT_WINDOW_SECONDS,
-    RATE_LIMIT_REQUESTS_PER_WINDOW,
     DAILY_BUDGET_REQUESTS,
     CIRCUIT_BREAKER_FAILURE_THRESHOLD,
     CIRCUIT_BREAKER_OPEN_DURATION,
@@ -99,49 +97,6 @@ def prepare_history(history) -> list[dict]:
     return kept
 
 
-def get_client_ip(request_headers) -> str:
-    if not request_headers:
-        return "unknown"
-    
-    xff = None
-    if hasattr(request_headers, "get"):
-        xff = request_headers.get("X-Forwarded-For") or request_headers.get("x-forwarded-for")
-    elif isinstance(request_headers, dict):
-        xff = request_headers.get("X-Forwarded-For") or request_headers.get("x-forwarded-for")
-    
-    if xff:
-        return xff.split(",")[0].strip()
-    
-    remote = None
-    if hasattr(request_headers, "get"):
-        remote = request_headers.get("RemoteAddr") or request_headers.get("remote_addr")
-    elif isinstance(request_headers, dict):
-        remote = request_headers.get("RemoteAddr") or request_headers.get("remote_addr")
-        
-    return remote or "unknown"
-
-
-class SlidingWindowRateLimiter:
-    def __init__(self, requests_per_window: int, window_seconds: int):
-        self.requests = defaultdict(list)
-        self.max_requests = requests_per_window
-        self.window_seconds = window_seconds
-
-    def check_rate_limit(self, client_ip: str) -> tuple[bool, str | None]:
-        current_time = time.time()
-        self.requests[client_ip] = [
-            t for t in self.requests[client_ip] 
-            if current_time - t < self.window_seconds
-        ]
-        
-        if len(self.requests[client_ip]) >= self.max_requests:
-            logger.warning("guard_rate_limit_triggered")
-            return False, "Too many requests. Please wait a moment before trying again."
-        
-        self.requests[client_ip].append(current_time)
-        return True, None
-
-
 class DailyBudgetGuard:
     def __init__(self, max_requests: int):
         self.max_requests = max_requests
@@ -199,7 +154,6 @@ class CircuitBreaker:
         return True
 
 
-rate_limiter = SlidingWindowRateLimiter(RATE_LIMIT_REQUESTS_PER_WINDOW, RATE_LIMIT_WINDOW_SECONDS)
 daily_budget = DailyBudgetGuard(DAILY_BUDGET_REQUESTS)
 circuit_breaker = CircuitBreaker(failure_threshold=CIRCUIT_BREAKER_FAILURE_THRESHOLD,recovery_timeout=CIRCUIT_BREAKER_OPEN_DURATION)
 
