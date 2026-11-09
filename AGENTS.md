@@ -12,6 +12,7 @@ A Gradio chat app (`app.py`) that answers questions as a "digital twin" using an
   - `digital_twin/spend.py`: daily model-call budget and the model-API circuit breaker.
   - `digital_twin/toolguards.py`: write-tool input cleaning, per-session/per-client write caps and dedupe (used by `digital_twin/tools.py`).
 - `tests/`: pytest suite.
+  - `tests/fixtures/adversarial.json`: adversarial cases (prompt extraction, jailbreaks, contact spam, long inputs, multilingual, forged headers). `tests/test_adversarial.py` runs them deterministically with a fake model; `tests/test_adversarial_live.py` runs them against the real model.
 - `.context/` (untracked): planning notes, including `roadmap.md` and `audit.md` (where each guard hooks in and what's still open). Read the audit instead of re-auditing the repo.
 - `docs/`: project documentation only. Planning and audit notes go in `.context/`.
 
@@ -19,6 +20,7 @@ A Gradio chat app (`app.py`) that answers questions as a "digital twin" using an
 - **Stay framework-free.** Plain Python plus the existing dependencies; no web frameworks, DI containers or validation libraries.
 - **Never log tool arguments, message content or personal data** (names, emails, email domains, IPs, session ids). Log event names and counts only.
 - **Run `uv run pytest` before finishing** any change, and report the result.
+- **Never run the live tests (`uv run pytest --live`) without the user's explicit go-ahead.** They call the real model API and cost money. When approved, run exactly `uv run pytest --live -m live` and keep the default spend cap unless told otherwise.
 - **Add no new dependencies without asking first.**
 - **No Redis or other external store.** Limiters and counters keep their in-memory backend behind an interface (`LIMITER_BACKEND=memory`).
 - **Don't read `.env`** or print secret values. Refer to env vars by name only.
