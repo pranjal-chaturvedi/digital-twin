@@ -1,19 +1,12 @@
 import re
-import time
 import logging
-from datetime import datetime
 from collections import defaultdict
-from enum import Enum
 
 from digital_twin.config import (
     MAX_MESSAGE_LENGTH,
     MAX_HISTORY_TURNS,
     MAX_HISTORY_CHARS,
-    MAX_TOKENS_REPLY,
     MAX_FIELD_LENGTH,
-    DAILY_BUDGET_REQUESTS,
-    CIRCUIT_BREAKER_FAILURE_THRESHOLD,
-    CIRCUIT_BREAKER_OPEN_DURATION,
     PER_SESSION_WRITE_LIMIT,
     RECORD_USER_DETAILS_LIMIT,
     RECORD_QUESTION_LIMIT,
@@ -95,67 +88,6 @@ def prepare_history(history) -> list[dict]:
     if len(kept) < len(cleaned):
         logger.info("guard_history_truncated", extra={"kept": len(kept), "dropped": len(cleaned) - len(kept)})
     return kept
-
-
-class DailyBudgetGuard:
-    def __init__(self, max_requests: int):
-        self.max_requests = max_requests
-        self.request_count = 0
-        self.reset_date = datetime.now().date()
-
-    def check_budget(self) -> tuple[bool, str | None]:
-        today = datetime.now().date()
-        if today > self.reset_date:
-            self.request_count = 0
-            self.reset_date = today
-            logger.info("guard_daily_budget_reset")
-
-        if self.request_count >= self.max_requests:
-            logger.warning("guard_daily_budget_exceeded")
-            return False, "Daily request budget reached. Please check back tomorrow!"
-
-        self.request_count += 1
-        return True, None
-
-
-class CircuitBreaker:
-    class State(Enum):
-        CLOSED = "closed"
-        OPEN = "open"
-        HALF_OPEN = "half_open"
-
-    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 300):
-        self.failure_threshold = failure_threshold
-        self.recovery_timeout = recovery_timeout
-        self.state = self.State.CLOSED
-        self.failure_count = 0
-        self.last_failure_time = None
-
-    def record_failure(self):
-        self.failure_count += 1
-        self.last_failure_time = time.time()
-        if self.failure_count >= self.failure_threshold:
-            self.state = self.State.OPEN
-            logger.error("guard_circuit_breaker_opened")
-
-    def record_success(self):
-        self.failure_count = 0
-        self.state = self.State.CLOSED
-
-    def can_proceed(self) -> bool:
-        if self.state == self.State.CLOSED:
-            return True
-        if self.state == self.State.OPEN:
-            if self.last_failure_time and (time.time() - self.last_failure_time) > self.recovery_timeout:
-                self.state = self.State.HALF_OPEN
-                logger.info("guard_circuit_breaker_half_open")
-                return True
-            return False
-        return True
-
-
-daily_budget = DailyBudgetGuard(DAILY_BUDGET_REQUESTS)
-circuit_breaker = CircuitBreaker(failure_threshold=CIRCUIT_BREAKER_FAILURE_THRESHOLD,recovery_timeout=CIRCUIT_BREAKER_OPEN_DURATION)
 
 
 class SessionToolLimiter:

@@ -6,7 +6,7 @@ import pytest
 
 import app
 from digital_twin import guards, ratelimit
-from digital_twin.guards import CircuitBreaker, DailyBudgetGuard
+from digital_twin.spend import CircuitBreaker, DailyBudget
 from digital_twin.ratelimit import SlidingWindowRateLimiter
 
 
@@ -45,7 +45,7 @@ def client(monkeypatch):
     fake = FakeClient()
     monkeypatch.setattr(app, "get_client", lambda: fake)
     monkeypatch.setattr(app, "rate_limiter", SlidingWindowRateLimiter(100, 60))
-    monkeypatch.setattr(app, "daily_budget", DailyBudgetGuard(100))
+    monkeypatch.setattr(app, "daily_budget", DailyBudget(100))
     monkeypatch.setattr(app, "circuit_breaker", CircuitBreaker(5, 300))
     monkeypatch.setattr(
         app, "handle_tool_calls",
@@ -67,10 +67,10 @@ def test_rejected_message_makes_no_model_call(client, message):
 
 
 def test_rejected_message_does_not_spend_budget(client, monkeypatch):
-    budget = DailyBudgetGuard(1)
+    budget = DailyBudget(1)
     monkeypatch.setattr(app, "daily_budget", budget)
     app.chat("a" * (guards.MAX_MESSAGE_LENGTH + 1), [])
-    assert budget.request_count == 0
+    assert budget.used == 0
     # The single budgeted request is still available for a valid message
     assert app.chat("Hello", []) == "answer"
 
@@ -99,7 +99,7 @@ def test_forged_forwarded_for_does_not_bypass_rate_limit(client, monkeypatch):
 
 def test_max_tokens_set_on_plain_call(client):
     app.chat("Hello", [])
-    assert client.calls[0]["max_tokens"] == guards.MAX_TOKENS_REPLY
+    assert client.calls[0]["max_tokens"] == app.MAX_TOKENS_REPLY
 
 
 def test_max_tokens_set_on_every_call_including_final_tool_free_one(client, monkeypatch):
@@ -109,7 +109,7 @@ def test_max_tokens_set_on_every_call_including_final_tool_free_one(client, monk
     assert app.chat("Hello", []) == "answer"
 
     assert len(client.calls) == 4
-    assert all(call["max_tokens"] == guards.MAX_TOKENS_REPLY for call in client.calls)
+    assert all(call["max_tokens"] == app.MAX_TOKENS_REPLY for call in client.calls)
     assert "tool_choice" not in client.calls[0]
     assert client.calls[-1]["tool_choice"] == "none"
 
@@ -142,3 +142,73 @@ def test_malformed_history_does_not_crash(client):
 def test_model_error_returns_fallback(client):
     client.error = RuntimeError("upstream down")
     assert app.chat("Hello", []) == app.FALLBACK_REPLY
+
+
+# --- Spend protection --------------------------------------------------------
+
+def test_budget_is_charged_per_model_call(client, monkeypatch):
+    budget = DailyBudget(100)
+    monkeypatch.setattr(app, "daily_budget", budget)
+    client.tool_rounds = 2  # two tool rounds, then a text answer
+
+    app.chat("Hello", [])
+
+    assert len(client.calls) == 3
+    assert budget.used == 3
+
+
+def test_exhausted_budget_rests_without_model_call(client, monkeypatch):
+    budget = DailyBudget(1)
+    budget.try_spend()
+    monkeypatch.setattr(app, "daily_budget", budget)
+
+    assert app.chat("Hello", []) == app.RESTING_REPLY
+    assert client.calls == []
+
+
+def test_budget_running_out_mid_tool_loop_rests(client, monkeypatch):
+    monkeypatch.setattr(app, "daily_budget", DailyBudget(2))
+    client.tool_rounds = 99
+
+    assert app.chat("Hello", []) == app.RESTING_REPLY
+    assert len(client.calls) == 2
+
+
+def test_open_circuit_makes_no_model_call(client, monkeypatch):
+    breaker = CircuitBreaker(1, 300)
+    breaker.record_failure()
+    monkeypatch.setattr(app, "circuit_breaker", breaker)
+
+    assert app.chat("Hello", []) == app.CIRCUIT_OPEN_REPLY
+    assert client.calls == []
+
+
+def test_model_failures_open_the_circuit(client, monkeypatch):
+    monkeypatch.setattr(app, "circuit_breaker", CircuitBreaker(2, 300))
+    client.error = RuntimeError("upstream down")
+
+    app.chat("one", [])
+    app.chat("two", [])
+    assert app.chat("three", []) == app.CIRCUIT_OPEN_REPLY
+    assert len(client.calls) == 2
+
+
+def test_rejections_do_not_consume_the_half_open_probe(client, monkeypatch):
+    clock = SimpleNamespace(now=0.0)
+    breaker = CircuitBreaker(1, 10, clock=lambda: clock.now)
+    breaker.record_failure()
+    clock.now = 11
+    monkeypatch.setattr(app, "circuit_breaker", breaker)
+
+    # Invalid input is rejected before the breaker is asked, so the probe stays available
+    app.chat("", [])
+    assert app.chat("Hello", []) == "answer"
+    assert breaker.state is CircuitBreaker.State.CLOSED
+
+
+def test_model_failure_logs_only_the_error_type(client, caplog):
+    client.error = RuntimeError("secret@example.com said hi")
+    with caplog.at_level("WARNING"):
+        app.chat("my email is secret@example.com", [])
+    assert "RuntimeError" in caplog.text
+    assert "secret@example.com" not in caplog.text

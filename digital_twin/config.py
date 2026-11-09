@@ -57,7 +57,10 @@ QUEUE_MAX_SIZE = _int_env("GUARD_QUEUE_MAX_SIZE", 20)
 CONCURRENCY_LIMIT = _int_env("GUARD_CONCURRENCY_LIMIT", 4)
 
 # Global spend protection
-DAILY_BUDGET_REQUESTS = _int_env("GUARD_DAILY_BUDGET", 1000)
+# Model calls per UTC day across all clients. One chat can make up to MAX_TOOL_ROUNDS + 1
+# calls, so this counts calls, not chats. Each call's cost is dominated by the fixed
+# system prompt, so calls are a fair proxy for spend.
+DAILY_BUDGET_MODEL_CALLS = _int_env("GUARD_DAILY_BUDGET", 1000)
 CIRCUIT_BREAKER_FAILURE_THRESHOLD = _int_env("GUARD_CIRCUIT_FAILURE_THRESHOLD", 5)
 CIRCUIT_BREAKER_OPEN_DURATION = _int_env("GUARD_CIRCUIT_OPEN_TIME", 300)
 

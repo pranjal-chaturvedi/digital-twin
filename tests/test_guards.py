@@ -1,8 +1,6 @@
 import unittest
 from digital_twin.guards import (
     validate_message,
-    DailyBudgetGuard,
-    CircuitBreaker,
     SessionToolLimiter,
     GuardError,
     MAX_MESSAGE_LENGTH,
@@ -34,32 +32,6 @@ class TestGuards(unittest.TestCase):
         for msg in ["", "   ", "\n\t"]:
             with self.assertRaises(GuardError):
                 validate_message(msg)
-
-    def test_daily_budget_guard(self):
-        budget = DailyBudgetGuard(max_requests=2)
-
-        allowed, msg = budget.check_budget()
-        self.assertTrue(allowed)
-
-        allowed, msg = budget.check_budget()
-        self.assertTrue(allowed)
-
-        allowed, msg = budget.check_budget()
-        self.assertFalse(allowed)
-        self.assertIn("budget", msg.lower())
-
-    def test_circuit_breaker(self):
-        cb = CircuitBreaker(failure_threshold=2, recovery_timeout=60)
-        self.assertTrue(cb.can_proceed())
-
-        cb.record_failure()
-        self.assertTrue(cb.can_proceed())
-
-        cb.record_failure()
-        self.assertFalse(cb.can_proceed())
-
-        cb.record_success()
-        self.assertTrue(cb.can_proceed())
 
     def test_per_session_write_limit(self):
         limiter = SessionToolLimiter(write_tool_limit=2, tool_limits={"record_user_details": 2})
