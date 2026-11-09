@@ -2,6 +2,7 @@ from openai import OpenAI
 from digital_twin.context import TWIN_SYSTEM_PROMPT
 from digital_twin.tools import tools, handle_tool_calls
 from digital_twin.styles import CSS, JS, EXAMPLES
+from digital_twin.config import MAX_TOOL_ROUNDS
 from digital_twin.guards import (
     validate_message,
     get_client_ip,
@@ -20,7 +21,6 @@ load_dotenv(override=True)
 MODEL_NAME = os.getenv("MODEL_NAME")
 BASE_URL = os.getenv("BASE_URL")
 API_KEY = os.getenv("MODEL_API_KEY")
-MAX_TOOL_ROUNDS = int(os.getenv("MAX_TOOL_ROUNDS", "5"))
 
 FALLBACK_REPLY = "Sorry, I couldn't put together an answer to that. Could you try rephrasing?"
 

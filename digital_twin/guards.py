@@ -1,4 +1,3 @@
-import os
 import re
 import time
 import logging
@@ -6,23 +5,23 @@ from datetime import datetime
 from collections import defaultdict
 from enum import Enum
 
+from digital_twin.config import (
+    MAX_MESSAGE_LENGTH,
+    MAX_HISTORY_TURNS,
+    MAX_TOKENS_REPLY,
+    MAX_FIELD_LENGTH,
+    RATE_LIMIT_WINDOW_SECONDS,
+    RATE_LIMIT_REQUESTS_PER_WINDOW,
+    DAILY_BUDGET_REQUESTS,
+    CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+    CIRCUIT_BREAKER_OPEN_DURATION,
+    PER_SESSION_WRITE_LIMIT,
+    RECORD_USER_DETAILS_LIMIT,
+    RECORD_QUESTION_LIMIT,
+    REPEATED_PATTERN_THRESHOLD,
+)
+
 logger = logging.getLogger(__name__)
-
-MAX_MESSAGE_LENGTH = int(os.getenv("GUARD_MAX_MESSAGE_LENGTH", "500"))
-MAX_HISTORY_TURNS = int(os.getenv("GUARD_MAX_HISTORY_TURNS", "20"))
-MAX_TOKENS_REPLY = int(os.getenv("GUARD_MAX_TOKENS_REPLY", "1024"))
-MAX_FIELD_LENGTH = int(os.getenv("GUARD_MAX_FIELD_LENGTH", "2000"))
-
-RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("GUARD_RATE_LIMIT_WINDOW", "60"))
-RATE_LIMIT_REQUESTS_PER_WINDOW = int(os.getenv("GUARD_RATE_LIMIT_REQUESTS", "30"))
-
-DAILY_BUDGET_REQUESTS = int(os.getenv("GUARD_DAILY_BUDGET", "1000"))
-CIRCUIT_BREAKER_OPEN_DURATION = int(os.getenv("GUARD_CIRCUIT_OPEN_TIME", "300"))
-
-PER_SESSION_WRITE_LIMIT = int(os.getenv("GUARD_PER_SESSION_WRITE_LIMIT", "5"))
-RECORD_USER_DETAILS_LIMIT = int(os.getenv("GUARD_RECORD_USER_DETAILS_LIMIT", "3"))
-RECORD_QUESTION_LIMIT = int(os.getenv("GUARD_RECORD_QUESTION_LIMIT", "5"))
-REPEATED_PATTERN_THRESHOLD = int(os.getenv("GUARD_REPEATED_PATTERN_THRESHOLD", "3"))
 
 
 class GuardError(Exception):
@@ -153,7 +152,7 @@ class CircuitBreaker:
 
 rate_limiter = SlidingWindowRateLimiter(RATE_LIMIT_REQUESTS_PER_WINDOW, RATE_LIMIT_WINDOW_SECONDS)
 daily_budget = DailyBudgetGuard(DAILY_BUDGET_REQUESTS)
-circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=CIRCUIT_BREAKER_OPEN_DURATION)
+circuit_breaker = CircuitBreaker(failure_threshold=CIRCUIT_BREAKER_FAILURE_THRESHOLD,recovery_timeout=CIRCUIT_BREAKER_OPEN_DURATION)
 
 
 class SessionToolLimiter:

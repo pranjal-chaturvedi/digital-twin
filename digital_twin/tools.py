@@ -10,11 +10,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 from huggingface_hub import CommitScheduler
 
+from digital_twin.config import MAX_FIELD_LENGTH
+
 load_dotenv(override=True)
 
 HF_DATASET_REPO = os.getenv("HF_DATASET_REPO")
 PUSH_EVERY_MINUTES = 1
-MAX_FIELD_LENGTH = 2000
 
 # A Space starts each run with an empty disk. Reusing a file name would overwrite the
 # copy already on the Hub instead of adding to it, so every run writes its own files.
